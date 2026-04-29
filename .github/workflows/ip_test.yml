@@ -1,0 +1,27 @@
+name: Automated IP Validator
+on: 
+  workflow_dispatch: # One-click trigger
+
+jobs:
+  verify-ips:
+    runs-on: ubuntu-latest
+    strategy:
+      # This is the "Secret Sauce"
+      max-parallel: 1  # Forces them to run sequentially, not all at once
+      matrix:
+        account_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    name: Testing Account ${{ matrix.account_id }}
+    steps:
+      - name: Buffer Gap
+        # Creates your 1-minute delay between runners
+        run: sleep 60
+
+      - name: Identity Check
+        run: |
+          echo "RUNNER_ID: ${{ matrix.account_id }}"
+          echo "ASSIGNED_IP: $(curl -s https://ifconfig.me)"
+          
+          # Optional: Automatic logging to your PowerHouse VPS
+          # curl -X POST http://YOUR_VPS_IP:5000/log \
+          # -d "id=${{ matrix.account_id }}&ip=$(curl -s ifconfig.me)"
