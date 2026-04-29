@@ -1,0 +1,73 @@
+name: PowerHouse Stealth Gatekeeper (SAST)
+on:
+  workflow_dispatch: # Use this for your 22:13 initial start
+  schedule:
+    - cron: '0 * * * *' # Wakes up every hour to check the time gap
+
+jobs:
+  deploy_node:
+    runs-on: ubuntu-latest
+    env:
+      TZ: 'Africa/Johannesburg'
+      MIN_GAP_HOURS: 16
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Gatekeeper (16h Check)
+        id: gatekeeper
+        # This step checks if 16 hours have passed since the last SUCCESSFUL run
+        run: |
+          LAST_RUN_STR=$(curl -s -H "Authorization: bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/powerhouse_deploy.yml/runs?status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].created_at // "1970-01-01T00:00:00Z"')
+          
+          LAST_RUN_EPOCH=$(date -d "$LAST_RUN_STR" +%s)
+          NOW_EPOCH=$(date +%s)
+          HOURS_SINCE=$(( (NOW_EPOCH - LAST_RUN_EPOCH) / 3600 ))
+
+          echo "Last successful run was $HOURS_SINCE hours ago."
+
+          if [ "$HOURS_SINCE" -lt "$MIN_GAP_HOURS" ]; then
+            echo "STRIKE: Only $HOURS_SINCE hours passed. Standing down to maintain stealth."
+            echo "run_allowed=false" >> $GITHUB_OUTPUT
+          else
+            echo "GREEN LIGHT: $HOURS_SINCE hours have passed. Proceeding with deployment."
+            echo "run_allowed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Identity & IP Check
+        if: steps.gatekeeper.outputs.run_allowed == 'true'
+        run: |
+          RUNNER_IP=$(curl -s https://ifconfig.me)
+          echo "RUNNER_IP=$RUNNER_IP" >> $GITHUB_ENV
+
+      - name: Execute PowerHouse Script
+        if: steps.gatekeeper.outputs.run_allowed == 'true'
+        env:
+          API_KEY: ${{ secrets.RENDER_API_KEY }}
+          REPO_URL: ${{ secrets.GITLAB_REPO_URL }}
+        run: |
+          chmod +x ./powerhouse_script.sh
+          # Random jitter (0-5 minutes) so it doesn't always start exactly at :00
+          sleep $((RANDOM % 300)) 
+          ./powerhouse_script.sh "$API_KEY" "$REPO_URL" 1
+
+      - name: Generate Summary Report
+        if: always() && steps.gatekeeper.outputs.run_allowed == 'true'
+        run: |
+          echo "### 📊 Deployment Audit (Johannesburg Time)" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Timestamp (SAST)** | $(date) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **GitHub Runner IP** | \`${{ env.RUNNER_IP }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo -e "\n#### 🔑 SSH Connection String:" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "$HOME/.powerhouse_*.fleet" ]; then
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            cat $HOME/.powerhouse_*.fleet >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Warning:** No fleet file found. Deployment may have skipped or failed." >> $GITHUB_STEP_SUMMARY
+          fi
