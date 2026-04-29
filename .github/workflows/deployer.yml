@@ -11,28 +11,34 @@ jobs:
     env:
       TZ: 'Africa/Johannesburg'
       MIN_GAP_HOURS: 16
-      WORKFLOW_FILE: 'deployer.yml' # Matches your actual filename
+      WORKFLOW_FILE: 'deployer.yml'
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Gatekeeper & Memory Check
+      - name: Gatekeeper & IP Audit
         id: gatekeeper
         run: |
-          # 1. Pull History from GitHub API using the correct filename
+          # 1. Capture current IP for the log/audit
+          RUNNER_IP=$(curl -s https://ifconfig.me)
+          echo "RUNNER_IP=$RUNNER_IP" >> $GITHUB_ENV
+          echo "Current Runner IP: $RUNNER_IP"
+
+          # 2. Pull History
           HISTORY=$(curl -s -H "Authorization: bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ env.WORKFLOW_FILE }}/runs?status=success")
           
           LAST_RUN_STR=$(echo "$HISTORY" | jq -r '.workflow_runs[0].created_at // "1970-01-01T00:00:00Z"')
           RUN_COUNT=$(echo "$HISTORY" | jq '.total_count // 0')
           
-          # 2. Time Math
+          # 3. Time Math
           LAST_RUN_EPOCH=$(date -d "$LAST_RUN_STR" +%s)
           NOW_EPOCH=$(date +%s)
           HOURS_SINCE=$(( (NOW_EPOCH - LAST_RUN_EPOCH) / 3600 ))
 
           echo "Successful runs to date: $RUN_COUNT"
+          echo "Hours since last deployment: $HOURS_SINCE"
 
           if [ "$HOURS_SINCE" -lt "$MIN_GAP_HOURS" ]; then
             echo "STRIKE: Only $HOURS_SINCE hours passed. Standing down."
@@ -40,7 +46,6 @@ jobs:
           else
             echo "GREEN LIGHT: $HOURS_SINCE hours have passed."
             echo "run_allowed=true" >> $GITHUB_OUTPUT
-            # We tell the script to aim for the NEXT number in the sequence
             echo "target_count=$((RUN_COUNT + 1))" >> $GITHUB_OUTPUT
           fi
 
@@ -51,14 +56,7 @@ jobs:
           REPO_URL: ${{ secrets.GITLAB_REPO_URL }}
         run: |
           chmod +x ./powerhouse_script.sh
-          
-          # Capture IP for the summary
-          echo "RUNNER_IP=$(curl -s https://ifconfig.me)" >> $GITHUB_ENV
-          
-          # Random jitter (0-5 minutes)
           sleep $((RANDOM % 300)) 
-          
-          # Pass the dynamic target count (e.g., 2, 3, 4) to force region rotation
           ./powerhouse_script.sh "$API_KEY" "$REPO_URL" "${{ steps.gatekeeper.outputs.target_count }}"
 
       - name: Generate Summary Report
@@ -68,7 +66,7 @@ jobs:
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
           echo "| **Timestamp (SAST)** | $(date) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **GitHub Runner IP** | \`${{ env.RUNNER_IP }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Runner IP** | \`${{ env.RUNNER_IP }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Sequence Index** | ${{ steps.gatekeeper.outputs.target_count }} |" >> $GITHUB_STEP_SUMMARY
           
           FLEET_FILE=$(ls $HOME/.powerhouse_*.fleet 2>/dev/null || ls .powerhouse_*.fleet 2>/dev/null | head -n 1)
