@@ -62,7 +62,9 @@ show_cooldown_dashboard() {
 }
 
 # --- MAIN ---
-[[ -f "$STATE_FILE" ]] && source "$STATE_FILE" || { completed_count=0; last_success_ts=0; }
+# --- NEW CODE (VPS-Driven/Dynamic) ---
+completed_count=$(( ${3:-1} - 1 ))
+last_success_ts=0
 
 REGION_RESP=$(rget "/regions")
 mapfile -t POOL < <(echo "$REGION_RESP" | jq -r '.[] | select(.name != "singapore") | .name' 2>/dev/null)
