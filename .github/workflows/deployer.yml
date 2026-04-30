@@ -5,23 +5,26 @@ on:
     types: [tickle_deploy]
 
 jobs:
-  execute_payload:
+  # Everything MUST be in this single job
+  audit_and_deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Identity Audit & Script Execution
+      - name: Identity Check & Render Execution
         run: |
-          # 1. Identity Audit (Essential for VPS scraping)
+          # 1. Identity Check for VPS Scraping
           UA="${{ github.event.client_payload.user_agent }}"
-          echo "### IDENTITY_DATA_START ###"
+          echo "### IDENTITY_START ###"
           curl -s -A "$UA" https://ifconfig.me/all.json
-          echo "### IDENTITY_DATA_END ###"
+          echo "### IDENTITY_END ###"
 
-          # 2. Permission & Run
-          # This is the part that actually "tickles" the Render dashboard
+          # 2. Permission Grant
           chmod +x ./powerhouse_script.sh
+
+          # 3. The Actual Render Deployment
+          # This line MUST run to show activity on the dash
           ./powerhouse_script.sh \
             "${{ secrets.RENDER_API_KEY }}" \
             "${{ secrets.GITLAB_REPO_URL }}" \
