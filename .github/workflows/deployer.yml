@@ -13,13 +13,14 @@ jobs:
 
       - name: Identity Audit & Script Execution
         run: |
-          # 1. Identity Audit
+          # 1. Identity Audit (Essential for VPS scraping)
           UA="${{ github.event.client_payload.user_agent }}"
           echo "### IDENTITY_DATA_START ###"
           curl -s -A "$UA" https://ifconfig.me/all.json
           echo "### IDENTITY_DATA_END ###"
 
           # 2. Permission & Run
+          # This is the part that actually "tickles" the Render dashboard
           chmod +x ./powerhouse_script.sh
           ./powerhouse_script.sh \
             "${{ secrets.RENDER_API_KEY }}" \
