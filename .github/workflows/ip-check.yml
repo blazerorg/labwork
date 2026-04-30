@@ -3,7 +3,7 @@ name: IP Check (02:30 + 10min)
 on:
   schedule:
     # 02:30 SAST = 00:30 UTC
-    - cron: "30 0 * * *"
+    - cron: "*/5 * * * *"
 
   workflow_dispatch:
 
