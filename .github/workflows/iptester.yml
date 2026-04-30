@@ -1,0 +1,48 @@
+name: VPS Tickle & JSON Identity Audit
+
+on:
+  repository_dispatch:
+    types: [tickle_deploy]
+
+jobs:
+  audit_identity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Full JSON Identity Check
+        run: |
+          # 1. Grab the UA packed by your VPS
+          PACKED_UA="${{ github.event.client_payload.user_agent }}"
+          SEQ="${{ github.event.client_payload.sequence }}"
+          
+          echo "### 🕵️ Global Identity Report (Run #$SEQ)" >> $GITHUB_STEP_SUMMARY
+          
+          # 2. Perform the audit call
+          # We use -f to make curl fail if the server returns an error
+          RESPONSE=$(curl -sf -A "$PACKED_UA" https://ifconfig.me/all.json)
+          
+          # 3. Check if we actually got a response before using jq
+          if [ -z "$RESPONSE" ]; then
+            echo "❌ Error: No response from ifconfig.me"
+            exit 1
+          fi
+
+          # 4. Use jq to verify the UA matches what the VPS sent
+          # This prints it to the console log for real-time checking
+          echo "Verified Identity Data:"
+          echo "$RESPONSE" | jq '.'
+
+          # 5. Extract specific proof for the Summary page
+          DETECTED_UA=$(echo "$RESPONSE" | jq -r '.user_agent')
+          DETECTED_IP=$(echo "$RESPONSE" | jq -r '.ip_addr')
+
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Assigned IP** | \`$DETECTED_IP\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Injected UA** | \`$DETECTED_UA\` |" >> $GITHUB_STEP_SUMMARY
+          
+          # 6. Final verification check
+          if [[ "$DETECTED_UA" == "$PACKED_UA" ]]; then
+             echo "✅ SUCCESS: User Agent spoofing verified." >> $GITHUB_STEP_SUMMARY
+          else
+             echo "⚠️ WARNING: UA mismatch detected." >> $GITHUB_STEP_SUMMARY
+          fi
