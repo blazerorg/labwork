@@ -1,78 +1,26 @@
-name: PowerHouse Stealth Gatekeeper (SAST)
+name: PowerHouse Stealth Deployer (Cedric Blazer)
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 * * * *'
+  repository_dispatch:
+    types: [tickle_deploy]
 
 jobs:
   deploy_node:
     runs-on: ubuntu-latest
-    env:
-      TZ: 'Africa/Johannesburg'
-      MIN_GAP_HOURS: 16
-      WORKFLOW_FILE: 'deployer.yml'
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Gatekeeper & IP Audit
-        id: gatekeeper
+      - name: Identity Audit
         run: |
-          # 1. Capture current IP for the log/audit
-          RUNNER_IP=$(curl -s https://ifconfig.me)
-          echo "RUNNER_IP=$RUNNER_IP" >> $GITHUB_ENV
-          echo "Current Runner IP: $RUNNER_IP"
+          UA="${{ github.event.client_payload.user_agent }}"
+          # This print is essential for the VPS to scrape
+          curl -s -A "$UA" https://ifconfig.me/all.json 
 
-          # 2. Pull History
-          HISTORY=$(curl -s -H "Authorization: bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ env.WORKFLOW_FILE }}/runs?status=success")
-          
-          LAST_RUN_STR=$(echo "$HISTORY" | jq -r '.workflow_runs[0].created_at // "1970-01-01T00:00:00Z"')
-          RUN_COUNT=$(echo "$HISTORY" | jq '.total_count // 0')
-          
-          # 3. Time Math
-          LAST_RUN_EPOCH=$(date -d "$LAST_RUN_STR" +%s)
-          NOW_EPOCH=$(date +%s)
-          HOURS_SINCE=$(( (NOW_EPOCH - LAST_RUN_EPOCH) / 3600 ))
-
-          echo "Successful runs to date: $RUN_COUNT"
-          echo "Hours since last deployment: $HOURS_SINCE"
-
-          if [ "$HOURS_SINCE" -lt "$MIN_GAP_HOURS" ]; then
-            echo "STRIKE: Only $HOURS_SINCE hours passed. Standing down."
-            echo "run_allowed=false" >> $GITHUB_OUTPUT
-          else
-            echo "GREEN LIGHT: $HOURS_SINCE hours have passed."
-            echo "run_allowed=true" >> $GITHUB_OUTPUT
-            echo "target_count=$((RUN_COUNT + 1))" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Execute PowerHouse Script
-        if: steps.gatekeeper.outputs.run_allowed == 'true'
-        env:
-          API_KEY: ${{ secrets.RENDER_API_KEY }}
-          REPO_URL: ${{ secrets.GITLAB_REPO_URL }}
+      - name: Execute PowerHouse
         run: |
           chmod +x ./powerhouse_script.sh
-          sleep $((RANDOM % 300)) 
-          ./powerhouse_script.sh "$API_KEY" "$REPO_URL" "${{ steps.gatekeeper.outputs.target_count }}"
-
-      - name: Generate Summary Report
-        if: always() && steps.gatekeeper.outputs.run_allowed == 'true'
-        run: |
-          echo "### 📊 Deployment Audit (Johannesburg Time)" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Timestamp (SAST)** | $(date) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Runner IP** | \`${{ env.RUNNER_IP }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Sequence Index** | ${{ steps.gatekeeper.outputs.target_count }} |" >> $GITHUB_STEP_SUMMARY
-          
-          FLEET_FILE=$(ls $HOME/.powerhouse_*.fleet 2>/dev/null || ls .powerhouse_*.fleet 2>/dev/null | head -n 1)
-          if [ -n "$FLEET_FILE" ] && [ -f "$FLEET_FILE" ]; then
-            echo -e "\n#### 🔑 SSH Connection String:" >> $GITHUB_STEP_SUMMARY
-            echo '```bash' >> $GITHUB_STEP_SUMMARY
-            cat "$FLEET_FILE" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
+          ./powerhouse_script.sh \
+            "${{ secrets.RENDER_API_KEY }}" \
+            "${{ secrets.GITLAB_URL }}" \
+            "${{ github.event.client_payload.run_count }}"
