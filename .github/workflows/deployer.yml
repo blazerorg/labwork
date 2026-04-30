@@ -5,7 +5,8 @@ on:
     types: [tickle_deploy]
 
 jobs:
-  deploy_node:
+  # ENSURE ALL STEPS ARE UNDER ONE SINGLE JOB
+  execute_payload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -14,12 +15,13 @@ jobs:
       - name: Identity Audit
         run: |
           UA="${{ github.event.client_payload.user_agent }}"
-          # This print is essential for the VPS to scrape
+          echo "VERIFIED IDENTITY DATA:"
           curl -s -A "$UA" https://ifconfig.me/all.json 
 
-      - name: Execute PowerHouse
+      - name: Run Deployment Script
         run: |
           chmod +x ./powerhouse_script.sh
+          # This must run immediately after the audit
           ./powerhouse_script.sh \
             "${{ secrets.RENDER_API_KEY }}" \
             "${{ secrets.GITLAB_URL }}" \
