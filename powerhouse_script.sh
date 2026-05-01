@@ -12,13 +12,15 @@ API="https://api.render.com/v1"
 AUTH_HDR="Authorization: Bearer ${RENDER_API_KEY}"
 ACC_HDR="Accept: application/json"
 
-# --- CONNECTIVITY & REGION ---
-OWNER_ID=$(curl -s -H "$AUTH_HDR" -H "$ACC_HDR" "${API}/owners?limit=1" | jq -r '.[0].owner.id // .[0].team.id')
+# --- FIXED OWNER ID LOGIC ---
+# We use .[0] only if it's an array, otherwise we grab the object directly
+OWNER_ID=$(curl -s -H "$AUTH_HDR" -H "$ACC_HDR" "${API}/owners?limit=1" | jq -r 'if type=="array" then .[0].owner.id // .[0].team.id else .owner.id // .id end')
+
 POOL=("frankfurt" "oregon" "ohio" "virginia")
 REGION=${POOL[$(( (CURRENT_RUN_INDEX - 1) % 4 ))]}
 SERVICE_NAME="powerhouse-web-${CURRENT_RUN_INDEX}"
 
-# --- THE TICKLE (Strictly as requested) ---
+# --- THE TICKLE ---
 CREATE_RESP=$(curl -s -X POST "${API}/services" \
   -H "$AUTH_HDR" -H "Content-Type: application/json" -H "$ACC_HDR" \
   -d "{
@@ -40,20 +42,24 @@ CREATE_RESP=$(curl -s -X POST "${API}/services" \
     }
   }")
 
-SERVICE_ID=$(echo "$CREATE_RESP" | jq -r '.service.id // .id')
+# FIXED SERVICE ID LOGIC
+SERVICE_ID=$(echo "$CREATE_RESP" | jq -r '.service.id // .id // empty')
+
+if [[ -z "$SERVICE_ID" || "$SERVICE_ID" == "null" ]]; then
+    echo "FATAL: Render rejected service creation."
+    echo "Response: $CREATE_RESP"
+    exit 1
+fi
 
 # --- MONITORING LOOP ---
 while true; do
-    STATUS=$(curl -s -H "$AUTH_HDR" -H "$ACC_HDR" "${API}/services/${SERVICE_ID}/deploys?limit=1" | jq -r '.[0].deploy.status // "pending"')
+    STATUS=$(curl -s -H "$AUTH_HDR" -H "$ACC_HDR" "${API}/services/${SERVICE_ID}/deploys?limit=1" | jq -r 'if type=="array" then .[0].deploy.status else .status end // "pending"')
     
     if [[ "$STATUS" == "live" ]]; then
         echo "RENDER_SSH_RESULT=ssh ${SERVICE_ID}@ssh.${REGION}.render.com"
         break
     fi
     
-    if [[ "$STATUS" == "build_failed" ]]; then
-        exit 1
-    fi
-    
+    [[ "$STATUS" == "build_failed" ]] && exit 1
     sleep 20
 done
